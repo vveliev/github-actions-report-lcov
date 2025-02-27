@@ -279,7 +279,10 @@ async function getLcovVersion() {
 
   await exec.exec('lcov', ['--version'], options);
 
+  core.debug(`LCOV version output: ${output}`);
+
   const match = output.match(/lcov: version (\d+\.\d+\.\d+)/);
+  core.debug(`Parsed LCOV version: ${match ? match[1] : '0.0.0'}`);
   return match ? match[1] : '0.0.0';
 }
 
