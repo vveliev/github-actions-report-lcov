@@ -245,7 +245,7 @@ async function detail(coverageFile, octokit, baseSha, headSha, prFileChanges) {
 
     const trimmedChangedFiles = changedFiles
       .map(file => path.relative(workingDirectory, file))
-      .filter(file => !file.startsWith('..')); // Drop files outside the working directory
+      .filter(file => !file.startsWith('..') && !path.isAbsolute(file)); // Drop files outside the working directory
     core.debug(`Trimmed changed files with respect to working directory: ${trimmedChangedFiles}`);
 
     lines = lines.filter((line, index) => {
