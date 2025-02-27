@@ -239,6 +239,7 @@ async function detail(coverageFile, octokit, baseSha, headSha, prFileChanges) {
       });
     const listFilesResponse = await octokit.paginate(listFilesOptions);
     const changedFiles = listFilesResponse.map(file => file.filename);
+    core.debug(`Changed files in the PR: ${changedFiles}`);
 
     lines = lines.filter((line, index) => {
       if (index <= 2) return true; // Include header
