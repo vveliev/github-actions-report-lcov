@@ -282,17 +282,17 @@ async function getLcovVersion() {
   core.debug(`LCOV version output: ${output}`);
 
   const match = output.match(/lcov: LCOV version (\d+\.\d+)(?:-(\d+))?/);
-  let version = '0.0.0';
+  let version = '0.0-0';
   if (match) {
-    version = match[2] ? `${match[1]}.${match[2]}` : `${match[1]}.0`;
+    version = match[2] ? `${match[1]}-${match[2]}` : `${match[1]}-0`;
   }
   core.debug(`Parsed LCOV version: ${version}`);
   return version;
 }
 
 function compareVersions(v1, v2) {
-  const v1Parts = v1.split('.').map(Number);
-  const v2Parts = v2.split('.').map(Number);
+  const v1Parts = v1.split(/[-.]/).map(Number);
+  const v2Parts = v2.split(/[-.]/).map(Number);
 
   for (let i = 0; i < Math.max(v1Parts.length, v2Parts.length); i++) {
     const v1Part = v1Parts[i] || 0;
