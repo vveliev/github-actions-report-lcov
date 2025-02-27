@@ -281,9 +281,13 @@ async function getLcovVersion() {
 
   core.debug(`LCOV version output: ${output}`);
 
-  const match = output.match(/lcov: version (\d+\.\d+\.\d+)/);
-  core.debug(`Parsed LCOV version: ${match ? match[1] : '0.0.0'}`);
-  return match ? match[1] : '0.0.0';
+  const match = output.match(/lcov: LCOV version (\d+\.\d+)(?:-(\d+))?/);
+  let version = '0.0.0';
+  if (match) {
+    version = match[2] ? `${match[1]}.${match[2]}` : `${match[1]}.0`;
+  }
+  core.debug(`Parsed LCOV version: ${version}`);
+  return version;
 }
 
 function compareVersions(v1, v2) {
