@@ -11,10 +11,14 @@ const events = ['pull_request', 'pull_request_target'];
 
 async function run() {
   try {
+    core.debug('Starting the run function');
     const tmpPath = path.resolve(os.tmpdir(), github.context.action);
+    core.debug(`Temporary path resolved: ${tmpPath}`);
     const coverageFilesPattern = core.getInput('coverage-files');
+    core.debug(`Coverage files pattern: ${coverageFilesPattern}`);
     const globber = await glob.create(coverageFilesPattern);
     const coverageFiles = await globber.glob();
+    core.debug(`Coverage files found: ${coverageFiles}`);
     const titlePrefix = core.getInput('title-prefix');
     const additionalMessage = core.getInput('additional-message');
     const updateComment = core.getInput('update-comment') === 'true';
@@ -23,7 +27,9 @@ async function run() {
     await genhtml(coverageFiles, tmpPath);
 
     const coverageFile = await mergeCoverages(coverageFiles, tmpPath);
+    core.debug(`Merged coverage file: ${coverageFile}`);
     const totalCoverage = lcovTotal(coverageFile);
+    core.debug(`Total coverage: ${totalCoverage}`);
     const minimumCoverage = core.getInput('minimum-coverage');
     const gitHubToken = core.getInput('github-token').trim();
     const errorMessage = `The code coverage is too low: ${totalCoverage}. Expected at least ${minimumCoverage}.`;
@@ -33,6 +39,7 @@ async function run() {
     const isPR = events.includes(github.context.eventName);
 
     if (hasGithubToken && isPR) {
+      core.debug('GitHub token is available and the event is a pull request');
       const octokit = await github.getOctokit(gitHubToken);
       let baseSha, headSha, shaShort, commentHeaderPrefix;
 
@@ -86,6 +93,7 @@ async function createComment(body, octokit) {
 }
 
 async function upsertComment(body, commentHeaderPrefix, octokit) {
+  core.debug("Upserting a comment in the PR.")
   const issueComments = await octokit.rest.issues.listComments({
     repo: github.context.repo.repo,
     owner: github.context.repo.owner,
@@ -113,6 +121,7 @@ async function upsertComment(body, commentHeaderPrefix, octokit) {
 }
 
 async function genhtml(coverageFiles, tmpPath) {
+  core.debug("Generating HTML report from coverage files.")
   const workingDirectory = core.getInput('working-directory').trim() || './';
   const artifactName = core.getInput('artifact-name').trim();
   const artifactPath = path.resolve(tmpPath, 'html').trim();
@@ -142,6 +151,7 @@ async function genhtml(coverageFiles, tmpPath) {
 }
 
 async function mergeCoverages(coverageFiles, tmpPath) {
+  core.debug("Merging coverage files.")
   // This is broken for some reason:
   //const mergedCoverageFile = path.resolve(tmpPath, 'lcov.info');
   const mergedCoverageFile = tmpPath + '/lcov.info';
@@ -161,6 +171,7 @@ async function mergeCoverages(coverageFiles, tmpPath) {
 }
 
 async function summarize(coverageFile) {
+  core.debug("Summarizing coverage file.")
   let output = '';
 
   const options = {};
@@ -190,6 +201,7 @@ async function summarize(coverageFile) {
 }
 
 async function detail(coverageFile, octokit, baseSha, headSha, prFileChanges) {
+  core.debug("Generating detailed coverage report.")
   let output = '';
 
   const options = {};
