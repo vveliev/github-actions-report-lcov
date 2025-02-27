@@ -18,6 +18,7 @@ async function run() {
     const titlePrefix = core.getInput('title-prefix');
     const additionalMessage = core.getInput('additional-message');
     const updateComment = core.getInput('update-comment') === 'true';
+    const prFileChanges = core.getInput('pr-file-changes') === 'true';
 
     await genhtml(coverageFiles, tmpPath);
 
@@ -33,12 +34,22 @@ async function run() {
 
     if (hasGithubToken && isPR) {
       const octokit = await github.getOctokit(gitHubToken);
+      let baseSha, headSha, shaShort, commentHeaderPrefix;
+
+      if (prFileChanges) {
+        baseSha = github.context.payload.pull_request.base.sha;
+        headSha = github.context.payload.pull_request.head.sha;
+        shaShort = headSha.substr(0, 7);
+        commentHeaderPrefix = `### ${titlePrefix ? `${titlePrefix} ` : ''}[LCOV](https://github.com/marketplace/actions/report-lcov) of PR`;
+      } else {
+        headSha = github.context.payload.pull_request.head.sha;
+        shaShort = headSha.substr(0, 7);
+        commentHeaderPrefix = `### ${titlePrefix ? `${titlePrefix} ` : ''}[LCOV](https://github.com/marketplace/actions/report-lcov) of commit`;
+      }
+
       const summary = await summarize(coverageFile);
-      const details = await detail(coverageFile, octokit);
-      const sha = github.context.payload.pull_request.head.sha;
-      const shaShort = sha.substr(0, 7);
-      const commentHeaderPrefix = `### ${titlePrefix ? `${titlePrefix} ` : ''}[LCOV](https://github.com/marketplace/actions/report-lcov) of commit`;
-      let body = `${commentHeaderPrefix} [<code>${shaShort}</code>](${github.context.payload.pull_request.number}/commits/${sha}) during [${github.context.workflow} #${github.context.runNumber}](../actions/runs/${github.context.runId})\n<pre>${summary}\n\nFiles changed coverage rate:${details}</pre>${additionalMessage ? `\n${additionalMessage}` : ''}`;
+      const details = await detail(coverageFile, octokit, baseSha, headSha, prFileChanges);
+      let body = `${commentHeaderPrefix} [<code>${shaShort}</code>](${github.context.payload.pull_request.number}/commits/${headSha}) during [${github.context.workflow} #${github.context.runNumber}](../actions/runs/${github.context.runId})\n<pre>${summary}\n\nFiles changed coverage rate:${details}</pre>${additionalMessage ? `\n${additionalMessage}` : ''}`;
 
       if (!isMinimumCoverageReached) {
         body += `\n:no_entry: ${errorMessage}`;
@@ -178,7 +189,7 @@ async function summarize(coverageFile) {
   return lines.join('\n');
 }
 
-async function detail(coverageFile, octokit) {
+async function detail(coverageFile, octokit, baseSha, headSha, prFileChanges) {
   let output = '';
 
   const options = {};
@@ -207,26 +218,26 @@ async function detail(coverageFile, octokit) {
   lines.pop(); // Removes "Total..."
   lines.pop(); // Removes "========"
 
-  const listFilesOptions = octokit
-    .rest.pulls.listFiles.endpoint.merge({
-      owner: github.context.repo.owner,
-      repo: github.context.repo.repo,
-      pull_number: github.context.payload.pull_request.number,
+  if (prFileChanges) {
+    const listFilesOptions = octokit
+      .rest.pulls.listFiles.endpoint.merge({
+        owner: github.context.repo.owner,
+        repo: github.context.repo.repo,
+        pull_number: github.context.payload.pull_request.number,
+      });
+    const listFilesResponse = await octokit.paginate(listFilesOptions);
+    const changedFiles = listFilesResponse.map(file => file.filename);
+
+    lines = lines.filter((line, index) => {
+      if (index <= 2) return true; // Include header
+
+      for (const changedFile of changedFiles) {
+        if (line.startsWith(changedFile)) return true;
+      }
+
+      return false;
     });
-  const listFilesResponse = await octokit.paginate(listFilesOptions);
-  const changedFiles = listFilesResponse.map(file => file.filename);
-
-  lines = lines.filter((line, index) => {
-    if (index <= 2) return true; // Include header
-
-    for (const changedFile of changedFiles) {
-      console.log(`${line} === ${changedFile}`);
-
-      if (line.startsWith(changedFile)) return true;
-    }
-
-    return false;
-  });
+  }
 
   if (lines.length === 3) { // Only the header remains
     return ' n/a';
