@@ -20,9 +20,12 @@ async function run() {
     const updateComment = core.getInput('update-comment') === 'true';
     const prFileChanges = core.getInput('pr-file-changes') === 'true';
 
-    await genhtml(coverageFiles, tmpPath);
+    const lcovVersion = await getLcovVersion();
+    const branchCoverageOption = lcovVersion >= '2.0.0' ? 'branch_coverage=1' : 'lcov_branch_coverage=1';
 
-    const coverageFile = await mergeCoverages(coverageFiles, tmpPath);
+    await genhtml(coverageFiles, tmpPath, branchCoverageOption);
+
+    const coverageFile = await mergeCoverages(coverageFiles, tmpPath, branchCoverageOption);
     const totalCoverage = lcovTotal(coverageFile);
     const minimumCoverage = core.getInput('minimum-coverage');
     const gitHubToken = core.getInput('github-token').trim();
@@ -47,8 +50,8 @@ async function run() {
         commentHeaderPrefix = `### ${titlePrefix ? `${titlePrefix} ` : ''}[LCOV](https://github.com/marketplace/actions/report-lcov) of commit`;
       }
 
-      const summary = await summarize(coverageFile);
-      const details = await detail(coverageFile, octokit, baseSha, headSha, prFileChanges);
+      const summary = await summarize(coverageFile, branchCoverageOption);
+      const details = await detail(coverageFile, octokit, baseSha, headSha, prFileChanges, branchCoverageOption);
       let body = `${commentHeaderPrefix} [<code>${shaShort}</code>](${github.context.payload.pull_request.number}/commits/${headSha}) during [${github.context.workflow} #${github.context.runNumber}](../actions/runs/${github.context.runId})\n<pre>${summary}\n\nFiles changed coverage rate:${details}</pre>${additionalMessage ? `\n${additionalMessage}` : ''}`;
 
       if (!isMinimumCoverageReached) {
@@ -112,11 +115,11 @@ async function upsertComment(body, commentHeaderPrefix, octokit) {
   }
 }
 
-async function genhtml(coverageFiles, tmpPath) {
+async function genhtml(coverageFiles, tmpPath, branchCoverageOption) {
   const workingDirectory = core.getInput('working-directory').trim() || './';
   const artifactName = core.getInput('artifact-name').trim();
   const artifactPath = path.resolve(tmpPath, 'html').trim();
-  const args = [...coverageFiles, '--rc', 'lcov_branch_coverage=1'];
+  const args = [...coverageFiles, '--rc', branchCoverageOption];
 
   args.push('--output-directory');
   args.push(artifactPath);
@@ -130,20 +133,13 @@ async function genhtml(coverageFiles, tmpPath) {
 
     core.info(`Uploading artifacts.`);
 
-    await artifact
-      .uploadArtifact(
-        artifactName,
-        htmlFiles,
-        artifactPath,
-      );
+    await artifact.uploadArtifact(artifactName, htmlFiles, artifactPath);
   } else {
     core.info("Skip uploading artifacts");
   }
 }
 
-async function mergeCoverages(coverageFiles, tmpPath) {
-  // This is broken for some reason:
-  //const mergedCoverageFile = path.resolve(tmpPath, 'lcov.info');
+async function mergeCoverages(coverageFiles, tmpPath, branchCoverageOption) {
   const mergedCoverageFile = tmpPath + '/lcov.info';
   const args = [];
 
@@ -155,12 +151,12 @@ async function mergeCoverages(coverageFiles, tmpPath) {
   args.push('--output-file');
   args.push(mergedCoverageFile);
 
-  await exec.exec('lcov', [...args, '--rc', 'lcov_branch_coverage=1']);
+  await exec.exec('lcov', [...args, '--rc', branchCoverageOption]);
 
   return mergedCoverageFile;
 }
 
-async function summarize(coverageFile) {
+async function summarize(coverageFile, branchCoverageOption) {
   let output = '';
 
   const options = {};
@@ -177,7 +173,7 @@ async function summarize(coverageFile) {
     '--summary',
     coverageFile,
     '--rc',
-    'lcov_branch_coverage=1'
+    branchCoverageOption
   ], options);
 
   const lines = output
@@ -189,7 +185,7 @@ async function summarize(coverageFile) {
   return lines.join('\n');
 }
 
-async function detail(coverageFile, octokit, baseSha, headSha, prFileChanges) {
+async function detail(coverageFile, octokit, baseSha, headSha, prFileChanges, branchCoverageOption) {
   let output = '';
 
   const options = {};
@@ -207,7 +203,7 @@ async function detail(coverageFile, octokit, baseSha, headSha, prFileChanges) {
     coverageFile,
     '--list-full-path',
     '--rc',
-    'lcov_branch_coverage=1',
+    branchCoverageOption,
   ], options);
 
   let lines = output
@@ -244,6 +240,25 @@ async function detail(coverageFile, octokit, baseSha, headSha, prFileChanges) {
   }
 
   return '\n  ' + lines.join('\n  ');
+}
+
+async function getLcovVersion() {
+  let output = '';
+
+  const options = {};
+  options.listeners = {
+    stdout: (data) => {
+      output += data.toString();
+    },
+    stderr: (data) => {
+      output += data.toString();
+    }
+  };
+
+  await exec.exec('lcov', ['--version'], options);
+
+  const match = output.match(/lcov: version (\d+\.\d+\.\d+)/);
+  return match ? match[1] : '0.0.0';
 }
 
 run();
