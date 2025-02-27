@@ -214,13 +214,15 @@ async function detail(coverageFile, octokit, baseSha, headSha, prFileChanges) {
     }
   };
 
+  const workingDirectory = core.getInput('working-directory').trim() || './';
+
   await exec.exec('lcov', [
     '--list',
     coverageFile,
     '--list-full-path',
     '--rc',
     'lcov_branch_coverage=1',
-  ], options);
+  ], { ...options, cwd: workingDirectory });
 
   let lines = output
     .trim()
@@ -241,10 +243,15 @@ async function detail(coverageFile, octokit, baseSha, headSha, prFileChanges) {
     const changedFiles = listFilesResponse.map(file => file.filename);
     core.debug(`Changed files in the PR: ${changedFiles}`);
 
+    const trimmedChangedFiles = changedFiles
+      .map(file => path.relative(workingDirectory, file))
+      .filter(file => !file.startsWith('..')); // Drop files outside the working directory
+    core.debug(`Trimmed changed files with respect to working directory: ${trimmedChangedFiles}`);
+
     lines = lines.filter((line, index) => {
       if (index <= 2) return true; // Include header
 
-      for (const changedFile of changedFiles) {
+      for (const changedFile of trimmedChangedFiles) {
         if (line.startsWith(changedFile)) return true;
       }
 
