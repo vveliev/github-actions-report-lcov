@@ -14,23 +14,25 @@ async function run() {
     core.debug('Starting the action');
     const workingDirectory = core.getInput('working-directory').trim() || './';
     const tmpPath = path.resolve(os.tmpdir(), github.context.action);
-    core.debug(`Temporary path: ${tmpPath}`);
     const coverageFilesPattern = core.getInput('coverage-files');
-    core.debug(`Coverage files pattern: ${coverageFilesPattern}`);
-    const globber = await glob.create(coverageFilesPattern);
-    const coverageFiles = await globber.glob();
-    core.debug(`Coverage files: ${coverageFiles}`);
     const titlePrefix = core.getInput('title-prefix');
     const additionalMessage = core.getInput('additional-message');
     const updateComment = core.getInput('update-comment') === 'true';
 
+    // find the version of lcov
     const lcovVersion = await getLcovVersion();
     core.debug(`LCOV version: ${lcovVersion}`);
     const branchCoverageOption = compareVersions(lcovVersion, '2.0.0') >= 0 ? 'branch_coverage=1' : 'lcov_branch_coverage=1';
     core.debug(`Branch coverage option: ${branchCoverageOption}`);
+    
     // Change working directory
     core.info(`Changing working directory to: ${workingDirectory}`);
     process.chdir(workingDirectory);
+
+    // Get the list of coverage files
+    const globber = await glob.create(coverageFilesPattern);
+    const coverageFiles = await globber.glob();
+    core.debug(`Coverage files: ${coverageFiles}`);
 
     core.info(`Coverage files found: ${coverageFiles.join(', ')}`);
 
