@@ -19,15 +19,15 @@ async function run() {
     const additionalMessage = core.getInput('additional-message');
     const updateComment = core.getInput('update-comment') === 'true';
 
+   // Change working directory
+   core.info(`Changing working directory to: ${workingDirectory}`);
+   process.chdir(workingDirectory);
+
     // find the version of lcov
     const lcovVersion = await getLcovVersion();
     core.debug(`LCOV version: ${lcovVersion}`);
     const branchCoverageOption = compareVersions(lcovVersion, '2.0.0') >= 0 ? 'branch_coverage=1' : 'lcov_branch_coverage=1';
     core.debug(`Branch coverage option: ${branchCoverageOption}`);
-    
-    // Change working directory
-    core.info(`Changing working directory to: ${workingDirectory}`);
-    process.chdir(workingDirectory);
 
     // Get the list of coverage files
     const globber = await glob.create(coverageFilesPattern);
@@ -39,8 +39,6 @@ async function run() {
     if (coverageFiles.length === 0) {
       throw new Error('No coverage files found.');
     }
-
-    await genhtml(coverageFiles, tmpPath);
 
     await genhtml(coverageFiles, tmpPath, branchCoverageOption);
 
@@ -129,7 +127,6 @@ async function upsertComment(body, commentHeaderPrefix, octokit) {
 }
 
 async function genhtml(coverageFiles, tmpPath, branchCoverageOption) {
-  const workingDirectory = core.getInput('working-directory').trim() || './';
   const artifactName = core.getInput('artifact-name').trim();
   const artifactPath = path.resolve(tmpPath, 'html').trim();
   const args = [...coverageFiles, '--rc', branchCoverageOption];
@@ -139,7 +136,7 @@ async function genhtml(coverageFiles, tmpPath, branchCoverageOption) {
 
   core.debug(`Running genhtml with args: ${args.join(' ')}`);
 
-  await exec.exec('genhtml', args, { cwd: workingDirectory });
+  await exec.exec('genhtml', args);
 
   if (artifactName !== '') {
     const artifact = new DefaultArtifactClient();
