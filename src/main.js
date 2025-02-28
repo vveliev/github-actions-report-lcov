@@ -206,7 +206,7 @@ function filterChangedFiles(changedFiles, workingDirectory) {
     .filter(file => path.resolve(file).startsWith(path.resolve(workingDirectory)))
     .map(file => path.relative(workingDirectory, path.resolve(file)));
 }
-async function detail(coverageFile, octokit, branchCoverageOption) {
+async function detail(coverageFile, octokit, branchCoverageOption, workingDirectory) {
   let output = '';
 
   const options = {};
