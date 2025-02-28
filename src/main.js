@@ -44,14 +44,9 @@ async function run() {
       let baseSha, headSha, shaShort, commentHeaderPrefix;
 
       if (prFileChanges) {
-        baseSha = github.context.payload.pull_request.base.sha;
-        headSha = github.context.payload.pull_request.head.sha;
-        shaShort = headSha.substr(0, 7);
-        commentHeaderPrefix = `### ${titlePrefix ? `${titlePrefix} ` : ''}[LCOV](https://github.com/marketplace/actions/report-lcov) of PR`;
+        ({ baseSha, headSha, shaShort, commentHeaderPrefix } = await getPRFileChanges(octokit, titlePrefix));
       } else {
-        headSha = github.context.payload.pull_request.head.sha;
-        shaShort = headSha.substr(0, 7);
-        commentHeaderPrefix = `### ${titlePrefix ? `${titlePrefix} ` : ''}[LCOV](https://github.com/marketplace/actions/report-lcov) of commit`;
+        ({ headSha, shaShort, commentHeaderPrefix } = await getCommitFileChanges(octokit, titlePrefix));
       }
 
       const summary = await summarize(coverageFile);
@@ -79,6 +74,23 @@ async function run() {
   } catch (error) {
     core.setFailed(error.message);
   }
+}
+
+async function getPRFileChanges(octokit, titlePrefix) {
+  const baseSha = github.context.payload.pull_request.base.sha;
+  const headSha = github.context.payload.pull_request.head.sha;
+  const shaShort = headSha.substr(0, 7);
+  const commentHeaderPrefix = `### ${titlePrefix ? `${titlePrefix} ` : ''}[LCOV](https://github.com/marketplace/actions/report-lcov) of PR`;
+
+  return { baseSha, headSha, shaShort, commentHeaderPrefix };
+}
+
+async function getCommitFileChanges(octokit, titlePrefix) {
+  const headSha = github.context.payload.pull_request.head.sha;
+  const shaShort = headSha.substr(0, 7);
+  const commentHeaderPrefix = `### ${titlePrefix ? `${titlePrefix} ` : ''}[LCOV](https://github.com/marketplace/actions/report-lcov) of commit`;
+
+  return { headSha, shaShort, commentHeaderPrefix };
 }
 
 async function createComment(body, octokit) {
@@ -248,11 +260,14 @@ async function detail(coverageFile, octokit, baseSha, headSha, prFileChanges) {
       .filter(file => !file.startsWith('..') && !path.isAbsolute(file)); // Drop files outside the working directory
     core.debug(`Trimmed changed files with respect to working directory: ${trimmedChangedFiles}`);
 
+    // Print the trimmed changed files
+    console.log(`Trimmed changed files: ${JSON.stringify(trimmedChangedFiles, null, 2)}`);
+
     lines = lines.filter((line, index) => {
       if (index <= 2) return true; // Include header
 
       for (const changedFile of trimmedChangedFiles) {
-        if (line.startsWith(changedFile)) return true;
+        if (line.includes(changedFile)) return true;
       }
 
       return false;
