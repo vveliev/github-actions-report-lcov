@@ -11,18 +11,25 @@ const events = ['pull_request', 'pull_request_target'];
 
 async function run() {
   try {
+    core.debug('Starting the run function');
     const tmpPath = path.resolve(os.tmpdir(), github.context.action);
+    core.debug(`Temporary path resolved: ${tmpPath}`);
     const coverageFilesPattern = core.getInput('coverage-files');
+    core.debug(`Coverage files pattern: ${coverageFilesPattern}`);
     const globber = await glob.create(coverageFilesPattern);
     const coverageFiles = await globber.glob();
+    core.debug(`Coverage files found: ${coverageFiles}`);
     const titlePrefix = core.getInput('title-prefix');
     const additionalMessage = core.getInput('additional-message');
     const updateComment = core.getInput('update-comment') === 'true';
+    const prFileChanges = core.getInput('pr-file-changes') === 'true';
 
     await genhtml(coverageFiles, tmpPath);
 
     const coverageFile = await mergeCoverages(coverageFiles, tmpPath);
+    core.debug(`Merged coverage file: ${coverageFile}`);
     const totalCoverage = lcovTotal(coverageFile);
+    core.debug(`Total coverage: ${totalCoverage}`);
     const minimumCoverage = core.getInput('minimum-coverage');
     const gitHubToken = core.getInput('github-token').trim();
     const errorMessage = `The code coverage is too low: ${totalCoverage}. Expected at least ${minimumCoverage}.`;
@@ -32,13 +39,19 @@ async function run() {
     const isPR = events.includes(github.context.eventName);
 
     if (hasGithubToken && isPR) {
+      core.debug('GitHub token is available and the event is a pull request');
       const octokit = await github.getOctokit(gitHubToken);
+      let baseSha, headSha, shaShort, commentHeaderPrefix;
+
+      if (prFileChanges) {
+        ({ baseSha, headSha, shaShort, commentHeaderPrefix } = await getPRFileChanges(octokit, titlePrefix));
+      } else {
+        ({ headSha, shaShort, commentHeaderPrefix } = await getCommitFileChanges(octokit, titlePrefix));
+      }
+
       const summary = await summarize(coverageFile);
-      const details = await detail(coverageFile, octokit);
-      const sha = github.context.payload.pull_request.head.sha;
-      const shaShort = sha.substr(0, 7);
-      const commentHeaderPrefix = `### ${titlePrefix ? `${titlePrefix} ` : ''}[LCOV](https://github.com/marketplace/actions/report-lcov) of commit`;
-      let body = `${commentHeaderPrefix} [<code>${shaShort}</code>](${github.context.payload.pull_request.number}/commits/${sha}) during [${github.context.workflow} #${github.context.runNumber}](../actions/runs/${github.context.runId})\n<pre>${summary}\n\nFiles changed coverage rate:${details}</pre>${additionalMessage ? `\n${additionalMessage}` : ''}`;
+      const details = await detail(coverageFile, octokit, baseSha, headSha, prFileChanges);
+      let body = `${commentHeaderPrefix} [<code>${shaShort}</code>](${github.context.payload.pull_request.number}/commits/${headSha}) during [${github.context.workflow} #${github.context.runNumber}](../actions/runs/${github.context.runId})\n<pre>${summary}\n\nFiles changed coverage rate:${details}</pre>${additionalMessage ? `\n${additionalMessage}` : ''}`;
 
       if (!isMinimumCoverageReached) {
         body += `\n:no_entry: ${errorMessage}`;
@@ -63,6 +76,23 @@ async function run() {
   }
 }
 
+async function getPRFileChanges(octokit, titlePrefix) {
+  const baseSha = github.context.payload.pull_request.base.sha;
+  const headSha = github.context.payload.pull_request.head.sha;
+  const shaShort = headSha.substr(0, 7);
+  const commentHeaderPrefix = `### ${titlePrefix ? `${titlePrefix} ` : ''}[LCOV](https://github.com/marketplace/actions/report-lcov) of PR`;
+
+  return { baseSha, headSha, shaShort, commentHeaderPrefix };
+}
+
+async function getCommitFileChanges(octokit, titlePrefix) {
+  const headSha = github.context.payload.pull_request.head.sha;
+  const shaShort = headSha.substr(0, 7);
+  const commentHeaderPrefix = `### ${titlePrefix ? `${titlePrefix} ` : ''}[LCOV](https://github.com/marketplace/actions/report-lcov) of commit`;
+
+  return { headSha, shaShort, commentHeaderPrefix };
+}
+
 async function createComment(body, octokit) {
   core.debug("Creating a comment in the PR.")
 
@@ -75,6 +105,7 @@ async function createComment(body, octokit) {
 }
 
 async function upsertComment(body, commentHeaderPrefix, octokit) {
+  core.debug("Upserting a comment in the PR.")
   const issueComments = await octokit.rest.issues.listComments({
     repo: github.context.repo.repo,
     owner: github.context.repo.owner,
@@ -102,6 +133,7 @@ async function upsertComment(body, commentHeaderPrefix, octokit) {
 }
 
 async function genhtml(coverageFiles, tmpPath) {
+  core.debug("Generating HTML report from coverage files.")
   const workingDirectory = core.getInput('working-directory').trim() || './';
   const artifactName = core.getInput('artifact-name').trim();
   const artifactPath = path.resolve(tmpPath, 'html').trim();
@@ -131,6 +163,7 @@ async function genhtml(coverageFiles, tmpPath) {
 }
 
 async function mergeCoverages(coverageFiles, tmpPath) {
+  core.debug("Merging coverage files.")
   // This is broken for some reason:
   //const mergedCoverageFile = path.resolve(tmpPath, 'lcov.info');
   const mergedCoverageFile = tmpPath + '/lcov.info';
@@ -150,6 +183,7 @@ async function mergeCoverages(coverageFiles, tmpPath) {
 }
 
 async function summarize(coverageFile) {
+  core.debug("Summarizing coverage file.")
   let output = '';
 
   const options = {};
@@ -178,7 +212,8 @@ async function summarize(coverageFile) {
   return lines.join('\n');
 }
 
-async function detail(coverageFile, octokit) {
+async function detail(coverageFile, octokit, baseSha, headSha, prFileChanges) {
+  core.debug("Generating detailed coverage report.")
   let output = '';
 
   const options = {};
@@ -191,13 +226,15 @@ async function detail(coverageFile, octokit) {
     }
   };
 
+  const workingDirectory = core.getInput('working-directory').trim() || './';
+
   await exec.exec('lcov', [
     '--list',
     coverageFile,
     '--list-full-path',
     '--rc',
     'lcov_branch_coverage=1',
-  ], options);
+  ], { ...options, cwd: workingDirectory });
 
   let lines = output
     .trim()
@@ -207,32 +244,44 @@ async function detail(coverageFile, octokit) {
   lines.pop(); // Removes "Total..."
   lines.pop(); // Removes "========"
 
-  const listFilesOptions = octokit
-    .rest.pulls.listFiles.endpoint.merge({
-      owner: github.context.repo.owner,
-      repo: github.context.repo.repo,
-      pull_number: github.context.payload.pull_request.number,
+  if (prFileChanges) {
+    const listFilesOptions = octokit
+      .rest.pulls.listFiles.endpoint.merge({
+        owner: github.context.repo.owner,
+        repo: github.context.repo.repo,
+        pull_number: github.context.payload.pull_request.number,
+      });
+    const listFilesResponse = await octokit.paginate(listFilesOptions);
+    const changedFiles = listFilesResponse.map(file => file.filename);
+    core.debug(`Changed files in the PR: ${changedFiles}`);
+
+    const trimmedChangedFiles = changedFiles
+      .map(file => path.relative(workingDirectory, file))
+      .filter(file => !file.startsWith('..') && !path.isAbsolute(file)); // Drop files outside the working directory
+    core.debug(`Trimmed changed files with respect to working directory: ${trimmedChangedFiles}`);
+
+    // Print the trimmed changed files
+    console.log(`Trimmed changed files: ${JSON.stringify(trimmedChangedFiles, null, 2)}`);
+
+    lines = lines.filter((line, index) => {
+      if (index <= 2) return true; // Include header
+
+      for (const changedFile of trimmedChangedFiles) {
+        if (line.includes(changedFile)) return true;
+      }
+
+      return false;
     });
-  const listFilesResponse = await octokit.paginate(listFilesOptions);
-  const changedFiles = listFilesResponse.map(file => file.filename);
 
-  lines = lines.filter((line, index) => {
-    if (index <= 2) return true; // Include header
-
-    for (const changedFile of changedFiles) {
-      console.log(`${line} === ${changedFile}`);
-
-      if (line.startsWith(changedFile)) return true;
-    }
-
-    return false;
-  });
+    // Ensure each file is on a new line
+    lines = lines.map(line => `  ${line}`);
+  }
 
   if (lines.length === 3) { // Only the header remains
     return ' n/a';
   }
 
-  return '\n  ' + lines.join('\n  ');
+  return '\n' + lines.join('\n');
 }
 
 run();
