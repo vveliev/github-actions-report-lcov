@@ -272,13 +272,16 @@ async function detail(coverageFile, octokit, baseSha, headSha, prFileChanges) {
 
       return false;
     });
+
+    // Ensure each file is on a new line
+    lines = lines.map(line => `  ${line}`);
   }
 
   if (lines.length === 3) { // Only the header remains
     return ' n/a';
   }
 
-  return '\n  ' + lines.join('\n  ');
+  return '\n' + lines.join('\n');
 }
 
 run();
