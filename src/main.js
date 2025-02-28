@@ -12,6 +12,7 @@ const events = ['pull_request', 'pull_request_target'];
 async function run() {
   try {
     core.debug('Starting the action');
+    const workingDirectory = core.getInput('working-directory').trim() || './';
     const tmpPath = path.resolve(os.tmpdir(), github.context.action);
     core.debug(`Temporary path: ${tmpPath}`);
     const coverageFilesPattern = core.getInput('coverage-files');
@@ -27,6 +28,17 @@ async function run() {
     core.debug(`LCOV version: ${lcovVersion}`);
     const branchCoverageOption = compareVersions(lcovVersion, '2.0.0') >= 0 ? 'branch_coverage=1' : 'lcov_branch_coverage=1';
     core.debug(`Branch coverage option: ${branchCoverageOption}`);
+    // Change working directory
+    core.info(`Changing working directory to: ${workingDirectory}`);
+    process.chdir(workingDirectory);
+
+    core.info(`Coverage files found: ${coverageFiles.join(', ')}`);
+
+    if (coverageFiles.length === 0) {
+      throw new Error('No coverage files found.');
+    }
+
+    await genhtml(coverageFiles, tmpPath);
 
     await genhtml(coverageFiles, tmpPath, branchCoverageOption);
 
@@ -45,7 +57,7 @@ async function run() {
     if (hasGithubToken && isPR) {
       const octokit = await github.getOctokit(gitHubToken);
       const summary = await summarize(coverageFile, branchCoverageOption);
-      const details = await detail(coverageFile, octokit, branchCoverageOption);
+      const details = await detail(coverageFile, octokit, branchCoverageOption, workingDirectory);
       const sha = github.context.payload.pull_request.head.sha;
       const shaShort = sha.substr(0, 7);
       const commentHeaderPrefix = `### ${titlePrefix ? `${titlePrefix} ` : ''}[LCOV](https://github.com/marketplace/actions/report-lcov) of commit`;
@@ -190,6 +202,11 @@ async function summarize(coverageFile, branchCoverageOption) {
   return lines.join('\n');
 }
 
+function filterChangedFiles(changedFiles, workingDirectory) {
+  return changedFiles
+    .filter(file => path.resolve(file).startsWith(path.resolve(workingDirectory)))
+    .map(file => path.relative(workingDirectory, path.resolve(file)));
+}
 async function detail(coverageFile, octokit, branchCoverageOption) {
   let output = '';
 
@@ -230,11 +247,15 @@ async function detail(coverageFile, octokit, branchCoverageOption) {
   const listFilesResponse = await octokit.paginate(listFilesOptions);
   const changedFiles = listFilesResponse.map(file => file.filename);
 
+  core.debug(`Changed files: ${changedFiles.join(', ')}`);
+
+  const filteredChangedFiles = filterChangedFiles(changedFiles, workingDirectory);
+
   lines = lines.filter((line, index) => {
     if (index <= 2) return true; // Include header
 
-    for (const changedFile of changedFiles) {
-      console.log(`${line} === ${changedFile}`);
+    for (const changedFile of filteredChangedFiles) {
+      core.debug(`Comparing line: ${line} with changedFile: ${changedFile}`);
 
       if (line.startsWith(changedFile)) return true;
     }
